@@ -1,0 +1,25 @@
+# Rust
+target/
+Cargo.lock
+
+# Local development overrides
+.cargo/config.toml
+.cargo/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Database files
+*.db
+*.wal
+*.shm
