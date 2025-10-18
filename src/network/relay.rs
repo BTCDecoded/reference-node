@@ -42,6 +42,10 @@ impl Default for RelayPolicies {
     }
 }
 
+impl Default for RelayManager {
+    fn default() -> Self { Self::new() }
+}
+
 impl RelayManager {
     /// Create a new relay manager
     pub fn new() -> Self {

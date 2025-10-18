@@ -3,17 +3,19 @@
 //! Handles transaction mempool management, validation, and relay.
 
 use anyhow::Result;
-use consensus_proof::{Transaction, UtxoSet, Hash};
+use consensus_proof::{Transaction, UtxoSet, Hash, OutPoint};
 use consensus_proof::mempool::Mempool;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tracing::{debug, info};
 
 /// Mempool manager
 pub struct MempoolManager {
     /// Transaction mempool
     mempool: Mempool,
-    /// UTXO set for validation
+    #[allow(dead_code)]
     utxo_set: UtxoSet,
+    /// Track spent outputs to detect conflicts
+    spent_outputs: HashSet<OutPoint>,
 }
 
 impl MempoolManager {
@@ -22,6 +24,7 @@ impl MempoolManager {
         Self {
             mempool: Mempool::new(),
             utxo_set: HashMap::new(),
+            spent_outputs: HashSet::new(),
         }
     }
     
@@ -34,6 +37,17 @@ impl MempoolManager {
         
         // Start mempool processing loop
         self.process_loop().await?;
+        
+        Ok(())
+    }
+    
+    /// Run mempool processing once (for testing)
+    pub async fn process_once(&mut self) -> Result<()> {
+        // Process pending transactions
+        self.process_pending_transactions().await?;
+        
+        // Clean up old transactions
+        self.cleanup_old_transactions().await?;
         
         Ok(())
     }
@@ -70,6 +84,7 @@ impl MempoolManager {
         // 3. Add valid transactions to mempool
         // 4. Relay transactions to peers
         
+        debug!("Processing pending transactions");
         Ok(())
     }
     
@@ -80,19 +95,31 @@ impl MempoolManager {
         // 2. Remove transactions that conflict with new blocks
         // 3. Update transaction priorities
         
+        debug!("Cleaning up old transactions");
         Ok(())
     }
     
     /// Add transaction to mempool
-    pub async fn add_transaction(&mut self, _tx: Transaction) -> Result<bool> {
+    pub async fn add_transaction(&mut self, tx: Transaction) -> Result<bool> {
         debug!("Adding transaction to mempool");
         
-        // In a real implementation, this would:
-        // 1. Validate transaction using consensus-proof
-        // 2. Check mempool limits
-        // 3. Add to mempool if valid
+        // Check for conflicts with existing mempool transactions
+        for input in &tx.inputs {
+            if self.spent_outputs.contains(&input.prevout) {
+                debug!("Transaction conflicts with existing mempool transaction");
+                return Ok(false);
+            }
+        }
         
-        // Simplified implementation
+        // Add transaction to mempool
+        let tx_hash = consensus_proof::mempool::calculate_tx_id(&tx);
+        self.mempool.insert(tx_hash);
+        
+        // Track spent outputs
+        for input in &tx.inputs {
+            self.spent_outputs.insert(input.prevout.clone());
+        }
+        
         Ok(true)
     }
     
@@ -110,4 +137,8 @@ impl MempoolManager {
     pub fn clear(&mut self) {
         self.mempool.clear();
     }
+}
+
+impl Default for MempoolManager {
+    fn default() -> Self { Self::new() }
 }

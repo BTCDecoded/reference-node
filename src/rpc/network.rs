@@ -60,3 +60,7 @@ impl NetworkRpc {
     }
 }
 
+impl Default for NetworkRpc {
+    fn default() -> Self { Self::new() }
+}
+

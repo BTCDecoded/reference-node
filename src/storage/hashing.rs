@@ -20,7 +20,7 @@ use sha2::{Sha256, Digest};
 /// 32-byte hash as array
 pub fn double_sha256(data: &[u8]) -> [u8; 32] {
     let first_hash = Sha256::digest(data);
-    let second_hash = Sha256::digest(&first_hash);
+    let second_hash = Sha256::digest(first_hash);
     
     let mut result = [0u8; 32];
     result.copy_from_slice(&second_hash);

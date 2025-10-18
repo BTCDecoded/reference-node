@@ -20,6 +20,7 @@ pub struct TxMetadata {
 
 /// Transaction index storage manager
 pub struct TxIndex {
+    #[allow(dead_code)]
     db: Db,
     tx_by_hash: sled::Tree,
     tx_by_block: sled::Tree,

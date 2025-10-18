@@ -39,6 +39,7 @@ impl Default for ChainParams {
 
 /// Chain state storage manager
 pub struct ChainState {
+    #[allow(dead_code)]
     db: Db,
     chain_info: sled::Tree,
     work_cache: sled::Tree,

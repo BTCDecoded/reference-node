@@ -166,3 +166,263 @@ impl RpcServer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn test_rpc_server_creation() {
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let server = RpcServer::new(addr);
+        assert_eq!(server.addr, addr);
+    }
+
+    #[tokio::test]
+    async fn test_process_request_valid_json() {
+        let request = r#"{"jsonrpc":"2.0","method":"getblockchaininfo","params":[],"id":1}"#;
+        let response = RpcServer::process_request(request).await;
+        
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert!(response["result"].is_object());
+        assert_eq!(response["id"], 1);
+    }
+
+    #[tokio::test]
+    async fn test_process_request_invalid_json() {
+        let request = "invalid json";
+        let response = RpcServer::process_request(request).await;
+        
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert_eq!(response["error"]["code"], -32700);
+        assert_eq!(response["error"]["message"], "Parse error");
+    }
+
+    #[tokio::test]
+    async fn test_process_request_unknown_method() {
+        let request = r#"{"jsonrpc":"2.0","method":"unknown_method","params":[],"id":1}"#;
+        let response = RpcServer::process_request(request).await;
+        
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert_eq!(response["error"]["code"], -32601);
+        assert_eq!(response["error"]["message"], "Method not found");
+        assert_eq!(response["id"], 1);
+    }
+
+    #[tokio::test]
+    async fn test_process_request_without_id() {
+        let request = r#"{"jsonrpc":"2.0","method":"getblockchaininfo","params":[]}"#;
+        let response = RpcServer::process_request(request).await;
+        
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert!(response["result"].is_object());
+        assert_eq!(response["id"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn test_process_request_with_params() {
+        let request = r#"{"jsonrpc":"2.0","method":"getblock","params":["000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"],"id":1}"#;
+        let response = RpcServer::process_request(request).await;
+        
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert!(response["result"].is_object());
+        assert_eq!(response["id"], 1);
+    }
+
+    #[tokio::test]
+    async fn test_call_method_getblockchaininfo() {
+        let result = RpcServer::call_method("getblockchaininfo", json!([])).await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert!(response.get("chain").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_call_method_getblock() {
+        let params = json!(["000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"]);
+        let result = RpcServer::call_method("getblock", params).await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert!(response.get("hash").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_call_method_getblockhash() {
+        let params = json!([0]);
+        let result = RpcServer::call_method("getblockhash", params).await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert!(response.is_string());
+    }
+
+    #[tokio::test]
+    async fn test_call_method_getrawtransaction() {
+        let params = json!(["0000000000000000000000000000000000000000000000000000000000000000"]);
+        let result = RpcServer::call_method("getrawtransaction", params).await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert!(response.get("txid").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_call_method_getnetworkinfo() {
+        let result = RpcServer::call_method("getnetworkinfo", json!([])).await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert!(response.get("version").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_call_method_getpeerinfo() {
+        let result = RpcServer::call_method("getpeerinfo", json!([])).await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert!(response.is_array());
+    }
+
+    #[tokio::test]
+    async fn test_call_method_getmininginfo() {
+        let result = RpcServer::call_method("getmininginfo", json!([])).await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert!(response.get("blocks").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_call_method_getblocktemplate() {
+        let result = RpcServer::call_method("getblocktemplate", json!([])).await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert!(response.get("version").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_call_method_unknown_method() {
+        let result = RpcServer::call_method("unknown_method", json!([])).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Unknown method"));
+    }
+
+    #[tokio::test]
+    async fn test_json_rpc_2_0_compliance() {
+        let request = r#"{"jsonrpc":"2.0","method":"getblockchaininfo","params":[],"id":1}"#;
+        let response = RpcServer::process_request(request).await;
+        
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert!(response["result"].is_object());
+        assert_eq!(response["id"], 1);
+    }
+
+    #[tokio::test]
+    async fn test_error_response_format() {
+        let request = r#"{"jsonrpc":"2.0","method":"unknown_method","params":[],"id":1}"#;
+        let response = RpcServer::process_request(request).await;
+        
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert!(response["error"].is_object());
+        assert!(response["error"]["code"].is_number());
+        assert!(response["error"]["message"].is_string());
+        assert_eq!(response["id"], 1);
+    }
+
+    #[tokio::test]
+    async fn test_parse_error_response() {
+        let request = "invalid json";
+        let response = RpcServer::process_request(request).await;
+        
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert_eq!(response["error"]["code"], -32700);
+        assert_eq!(response["error"]["message"], "Parse error");
+        assert!(response["error"]["data"].is_string());
+    }
+
+    #[tokio::test]
+    async fn test_method_not_found_response() {
+        let request = r#"{"jsonrpc":"2.0","method":"nonexistent","params":[],"id":42}"#;
+        let response = RpcServer::process_request(request).await;
+        
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert_eq!(response["error"]["code"], -32601);
+        assert_eq!(response["error"]["message"], "Method not found");
+        assert!(response["error"]["data"].is_string());
+        assert_eq!(response["id"], 42);
+    }
+
+    #[tokio::test]
+    async fn test_empty_params_handling() {
+        let request = r#"{"jsonrpc":"2.0","method":"getblockchaininfo","id":1}"#;
+        let response = RpcServer::process_request(request).await;
+        
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert!(response["result"].is_object());
+        assert_eq!(response["id"], 1);
+    }
+
+    #[tokio::test]
+    async fn test_missing_method_handling() {
+        let request = r#"{"jsonrpc":"2.0","params":[],"id":1}"#;
+        let response = RpcServer::process_request(request).await;
+        
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert_eq!(response["error"]["code"], -32601);
+        assert_eq!(response["error"]["message"], "Method not found");
+        assert_eq!(response["id"], 1);
+    }
+
+    #[tokio::test]
+    async fn test_blockchain_methods_integration() {
+        // Test all blockchain methods
+        let methods = vec![
+            "getblockchaininfo",
+            "getblock",
+            "getblockhash", 
+            "getrawtransaction"
+        ];
+        
+        for method in methods {
+            let request = format!(r#"{{"jsonrpc":"2.0","method":"{}","params":[],"id":1}}"#, method);
+            let response = RpcServer::process_request(&request).await;
+            
+            assert_eq!(response["jsonrpc"], "2.0");
+            assert!(response["result"].is_object() || response["result"].is_string());
+            assert_eq!(response["id"], 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_network_methods_integration() {
+        // Test all network methods
+        let methods = vec![
+            "getnetworkinfo",
+            "getpeerinfo"
+        ];
+        
+        for method in methods {
+            let request = format!(r#"{{"jsonrpc":"2.0","method":"{}","params":[],"id":1}}"#, method);
+            let response = RpcServer::process_request(&request).await;
+            
+            assert_eq!(response["jsonrpc"], "2.0");
+            assert!(response["result"].is_object() || response["result"].is_array());
+            assert_eq!(response["id"], 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_mining_methods_integration() {
+        // Test all mining methods
+        let methods = vec![
+            "getmininginfo",
+            "getblocktemplate"
+        ];
+        
+        for method in methods {
+            let request = format!(r#"{{"jsonrpc":"2.0","method":"{}","params":[],"id":1}}"#, method);
+            let response = RpcServer::process_request(&request).await;
+            
+            assert_eq!(response["jsonrpc"], "2.0");
+            assert!(response["result"].is_object());
+            assert_eq!(response["id"], 1);
+        }
+    }
+}

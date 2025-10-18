@@ -22,8 +22,11 @@ pub struct Node {
     storage: Storage,
     network: NetworkManager,
     rpc: RpcManager,
+    #[allow(dead_code)]
     sync_coordinator: sync::SyncCoordinator,
+    #[allow(dead_code)]
     mempool_manager: mempool::MempoolManager,
+    #[allow(dead_code)]
     mining_coordinator: miner::MiningCoordinator,
 }
 
@@ -44,9 +47,9 @@ impl Node {
         let storage = Storage::new(data_dir)?;
         let network = NetworkManager::new(network_addr);
         let rpc = RpcManager::new(rpc_addr);
-        let sync_coordinator = sync::SyncCoordinator::new();
+        let sync_coordinator = sync::SyncCoordinator::default();
         let mempool_manager = mempool::MempoolManager::new();
-        let mining_coordinator = miner::MiningCoordinator::new();
+        let mining_coordinator = miner::MiningCoordinator::default();
         
         Ok(Self {
             protocol,
@@ -101,6 +104,16 @@ impl Node {
             // Check node health
             self.check_health().await?;
         }
+    }
+    
+    /// Run node processing once (for testing)
+    pub async fn run_once(&mut self) -> Result<()> {
+        info!("Running node processing once");
+        
+        // Check node health
+        self.check_health().await?;
+        
+        Ok(())
     }
     
     /// Check node health

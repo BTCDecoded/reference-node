@@ -234,7 +234,7 @@ impl ProtocolParser {
         use sha2::{Sha256, Digest};
         
         let hash1 = Sha256::digest(payload);
-        let hash2 = Sha256::digest(&hash1);
+        let hash2 = Sha256::digest(hash1);
         
         let mut checksum = [0u8; 4];
         checksum.copy_from_slice(&hash2[..4]);

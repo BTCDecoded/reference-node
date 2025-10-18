@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 /// UTXO set storage manager
 pub struct UtxoStore {
+    #[allow(dead_code)]
     db: Db,
     utxos: sled::Tree,
     spent_outputs: sled::Tree,

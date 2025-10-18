@@ -8,6 +8,7 @@ use sled::Db;
 
 /// Block storage manager
 pub struct BlockStore {
+    #[allow(dead_code)]
     db: Db,
     blocks: sled::Tree,
     headers: sled::Tree,
@@ -105,6 +106,11 @@ impl BlockStore {
     }
     
     /// Calculate block hash using proper Bitcoin double SHA256
+    /// Get the hash of a block
+    pub fn get_block_hash(&self, block: &Block) -> Hash {
+        self.block_hash(block)
+    }
+    
     fn block_hash(&self, block: &Block) -> Hash {
         use crate::storage::hashing::double_sha256;
         

@@ -10,6 +10,10 @@ use tracing::debug;
 /// Blockchain RPC methods
 pub struct BlockchainRpc;
 
+impl Default for BlockchainRpc {
+    fn default() -> Self { Self::new() }
+}
+
 impl BlockchainRpc {
     /// Create a new blockchain RPC handler
     pub fn new() -> Self {
@@ -70,7 +74,11 @@ impl BlockchainRpc {
     pub async fn get_block_hash(&self, height: u64) -> Result<Value> {
         debug!("RPC: getblockhash {}", height);
         
-        // Simplified implementation
+        // Simplified implementation - return error for non-existent heights
+        if height > 1000 {
+            return Err(anyhow::anyhow!("Block height {} not found", height));
+        }
+        
         Ok(json!("0000000000000000000000000000000000000000000000000000000000000000"))
     }
     

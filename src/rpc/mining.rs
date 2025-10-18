@@ -22,6 +22,7 @@ impl MiningRpc {
         Ok(json!({
             "blocks": 0,
             "currentblocksize": 0,
+            "currentblockweight": 0,
             "currentblocktx": 0,
             "difficulty": 1.0,
             "networkhashps": 0.0,
@@ -61,4 +62,8 @@ impl MiningRpc {
             "height": 0
         }))
     }
+}
+
+impl Default for MiningRpc {
+    fn default() -> Self { Self::new() }
 }

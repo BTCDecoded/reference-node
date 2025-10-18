@@ -25,6 +25,10 @@ pub struct InventoryManager {
     peer_inventories: HashMap<String, HashSet<Hash>>,
 }
 
+impl Default for InventoryManager {
+    fn default() -> Self { Self::new() }
+}
+
 /// Inventory request
 #[derive(Debug, Clone)]
 pub struct InventoryRequest {
@@ -46,7 +50,7 @@ impl InventoryManager {
     
     /// Add inventory items from a peer
     pub fn add_inventory(&mut self, peer: &str, inventory: &[InventoryItem]) -> Result<()> {
-        let peer_inv = self.peer_inventories.entry(peer.to_string()).or_insert_with(HashSet::new);
+        let peer_inv = self.peer_inventories.entry(peer.to_string()).or_default();
         
         for item in inventory {
             peer_inv.insert(item.hash);
@@ -105,7 +109,10 @@ impl InventoryManager {
         
         let old_requests: Vec<Hash> = self.pending_requests
             .iter()
-            .filter(|(_, request)| now - request.timestamp > max_age_seconds)
+            .filter(|(_, request)| {
+                let age = now - request.timestamp;
+                age >= max_age_seconds
+            })
             .map(|(hash, _)| *hash)
             .collect();
         

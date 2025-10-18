@@ -4,8 +4,6 @@
 
 use anyhow::Result;
 use std::net::SocketAddr;
-// use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tracing::{debug, info};
 
@@ -22,7 +20,7 @@ pub struct Peer {
 impl Peer {
     /// Create a new peer connection
     pub fn new(
-        _stream: TcpStream,
+        _stream: tokio::net::TcpStream,
         addr: SocketAddr,
         message_tx: mpsc::UnboundedSender<NetworkMessage>,
     ) -> Self {
@@ -63,6 +61,7 @@ impl Peer {
     }
     
     /// Process a received message
+    #[allow(dead_code)]
     async fn process_message(&self, data: &[u8]) -> Result<()> {
         if data.len() < 4 {
             return Err(anyhow::anyhow!("Message too short"));
