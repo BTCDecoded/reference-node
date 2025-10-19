@@ -1,0 +1,10 @@
+[report]
+out = ["Html", "Xml"]
+output-dir = "coverage"
+
+[run]
+line = true
+branch = false
+ignore-tests = true
+timeout = "5m"
+follow-exec = true

@@ -1,0 +1,97 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+**/*.rmeta
+
+# Application-specific: ignore Cargo.lock for applications
+Cargo.lock
+
+# Coverage reports and profiling
+/coverage/
+/target/tarpaulin/
+*.tarpaulin
+*.profraw
+*.profdata
+/cobertura.xml
+/lcov.info
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.*.sw?
+*.sublime-*
+.project
+.classpath
+.settings/
+.vs/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+
+# Logs and databases
+*.log
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Node data directories
+/data/
+/blocks/
+/chainstate/
+
+# Local configuration
+/config.local.toml
+
+# Documentation build artifacts
+/target/doc/
+/book/
+
+# Benchmark results
+/target/criterion/
+/benches/*.txt
+
+# Flamegraph and profiling
+flamegraph.svg
+perf.data
+perf.data.old
+
+# Backup files
+*.bak
+*.gho
+*.ori
+*.orig
+*.tmp
+
+# Lock files from other tools
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Test artifacts
+*.test
+/test-results/
+
+# Misc
+.cache/
+*.pid

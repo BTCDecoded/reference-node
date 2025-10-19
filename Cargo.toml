@@ -1,0 +1,58 @@
+[package]
+name = "reference-node"
+version = "0.1.0"
+edition = "2021"
+authors = ["BTCDecoded Team"]
+description = "Minimal Bitcoin node implementation using protocol-engine and consensus-proof"
+license = "MIT"
+repository = "https://github.com/BTCDecoded/reference-node"
+homepage = "https://btcdecoded.org"
+documentation = "https://docs.rs/reference-node"
+keywords = ["bitcoin", "node", "blockchain", "cryptocurrency", "p2p"]
+categories = ["cryptography::cryptocurrencies", "network-programming"]
+rust-version = "1.70"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+# Consensus layer - Local path for development
+consensus-proof = { path = "../consensus-proof" }
+
+# Protocol abstraction layer - Local path for development
+protocol-engine = { path = "../protocol-engine" }
+
+# Storage layer - EXACT VERSIONS for security
+sled = "=0.34.7"
+
+# Networking layer - EXACT VERSIONS for security
+tokio = { version = "=1.35.1", features = ["full", "rt-multi-thread"] }
+tokio-util = { version = "=0.7.10", features = ["codec"] }
+futures = "=0.3.30"
+
+# Serialization - EXACT VERSIONS for security
+serde = { version = "=1.0.193", features = ["derive"] }
+serde_json = "=1.0.108"
+bincode = "=1.3.3"
+
+# Cryptography - EXACT VERSIONS for security
+sha2 = "=0.10.9"
+ripemd = "=0.1.3"
+hex = "=0.4.3"
+
+# Error handling - EXACT VERSIONS for security
+anyhow = "=1.0.93"
+thiserror = "=1.0.69"
+
+# Logging - EXACT VERSIONS for security
+tracing = "=0.1.40"
+tracing-subscriber = { version = "=0.3.18", features = ["env-filter"] }
+
+# CLI - EXACT VERSIONS for security
+clap = { version = "=4.4.11", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "=3.8.1"
+rand = "0.8"
+cargo-tarpaulin = "0.27"
