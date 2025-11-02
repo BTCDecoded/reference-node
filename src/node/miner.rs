@@ -267,6 +267,9 @@ pub struct MiningCoordinator {
     transaction_selector: TransactionSelector,
     /// Mempool provider
     mempool_provider: MockMempoolProvider,
+    /// Stratum V2 client (optional)
+    #[cfg(feature = "stratum-v2")]
+    stratum_v2_client: Option<crate::network::stratum_v2::client::StratumV2Client>,
 }
 
 impl Default for MiningCoordinator {
@@ -282,6 +285,8 @@ impl MiningCoordinator {
             mining_engine: MiningEngine::new(),
             transaction_selector: TransactionSelector::new(),
             mempool_provider,
+            #[cfg(feature = "stratum-v2")]
+            stratum_v2_client: None,
         }
     }
     
@@ -297,7 +302,21 @@ impl MiningCoordinator {
             mining_engine: MiningEngine::with_threads(threads),
             transaction_selector: TransactionSelector::with_params(max_block_size, max_block_weight, min_fee_rate),
             mempool_provider,
+            #[cfg(feature = "stratum-v2")]
+            stratum_v2_client: None,
         }
+    }
+    
+    /// Set Stratum V2 client
+    #[cfg(feature = "stratum-v2")]
+    pub fn set_stratum_v2_client(&mut self, client: crate::network::stratum_v2::client::StratumV2Client) {
+        self.stratum_v2_client = Some(client);
+    }
+    
+    /// Get Stratum V2 client (if enabled)
+    #[cfg(feature = "stratum-v2")]
+    pub fn stratum_v2_client(&self) -> Option<&crate::network::stratum_v2::client::StratumV2Client> {
+        self.stratum_v2_client.as_ref()
     }
     
     /// Start the mining coordinator

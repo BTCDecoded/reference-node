@@ -52,6 +52,25 @@ tracing-subscriber = { version = "=0.3.18", features = ["env-filter"] }
 # CLI - EXACT VERSIONS for security
 clap = { version = "=4.4.11", features = ["derive"] }
 
+# Async traits - for transport abstraction
+async-trait = "=0.1.75"
+
+# Bitflags for transport preference combinations
+bitflags = "2.4"
+
+# Iroh networking (optional feature)
+iroh-net = { version = "0.12", optional = true }
+# Quinn QUIC transport (optional feature - can be used standalone or via Iroh)
+quinn = { version = "0.11", optional = true }
+rcgen = { version = "0.11", optional = true }
+rustls = { version = "0.23", optional = true }
+
+[features]
+iroh = ["dep:iroh-net", "dep:quinn"]
+quinn = ["dep:quinn", "dep:rcgen", "dep:rustls"]
+utxo-commitments = ["consensus-proof/utxo-commitments"]
+stratum-v2 = []
+
 [dev-dependencies]
 tempfile = "=3.8.1"
 rand = "0.8"

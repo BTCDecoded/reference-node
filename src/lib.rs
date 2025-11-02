@@ -25,6 +25,9 @@ pub mod rpc;
 pub mod node;
 pub mod config;
 
+// Re-export config module
+pub use config::*;
+
 // Re-export commonly used types from consensus-proof
 pub use consensus_proof::{
     Block, BlockHeader, Transaction, TransactionInput, TransactionOutput,

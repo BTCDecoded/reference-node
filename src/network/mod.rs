@@ -7,20 +7,42 @@ pub mod peer;
 pub mod protocol;
 pub mod inventory;
 pub mod relay;
+pub mod transport;
+pub mod tcp_transport;
+pub mod protocol_adapter;
+pub mod message_bridge;
+pub mod protocol_extensions;
+
+#[cfg(feature = "quinn")]
+pub mod quinn_transport;
+
+#[cfg(feature = "iroh")]
+pub mod iroh_transport;
+
+#[cfg(feature = "utxo-commitments")]
+pub mod utxo_commitments_client;
+
+#[cfg(feature = "stratum-v2")]
+pub mod stratum_v2;
 
 use anyhow::Result;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tracing::{info, warn, error};
 
+use crate::network::transport::{
+    Transport, TransportListener, TransportConnection, TransportPreference, TransportAddr,
+};
+use crate::network::tcp_transport::TcpTransport;
+
 /// Network I/O operations for testing
+/// Note: This is deprecated - use TcpTransport instead
 pub struct NetworkIO;
 
 impl NetworkIO {
-    pub async fn bind(&self, addr: SocketAddr) -> Result<TcpListener> {
-        TcpListener::bind(addr).await.map_err(|e| anyhow::anyhow!(e))
+    pub async fn bind(&self, addr: SocketAddr) -> Result<tokio::net::TcpListener> {
+        tokio::net::TcpListener::bind(addr).await.map_err(|e| anyhow::anyhow!(e))
     }
     
     pub async fn connect(&self, addr: SocketAddr) -> Result<tokio::net::TcpStream> {
@@ -29,6 +51,7 @@ impl NetworkIO {
 }
 
 /// Peer manager for tracking connected peers
+#[derive(Clone)]
 pub struct PeerManager {
     peers: HashMap<SocketAddr, peer::Peer>,
     max_peers: usize,
@@ -76,6 +99,7 @@ impl PeerManager {
 }
 
 /// Connection manager for handling network connections
+/// Note: This is deprecated - use Transport abstraction instead
 pub struct ConnectionManager {
     listen_addr: SocketAddr,
     network_io: NetworkIO,
@@ -89,7 +113,7 @@ impl ConnectionManager {
         }
     }
     
-    pub async fn start_listening(&self) -> Result<TcpListener> {
+    pub async fn start_listening(&self) -> Result<tokio::net::TcpListener> {
         info!("Starting network listener on {}", self.listen_addr);
         self.network_io.bind(self.listen_addr).await
     }
@@ -101,9 +125,16 @@ impl ConnectionManager {
 }
 
 /// Network manager that coordinates all network operations
+///
+/// Supports multiple transports (TCP, Quinn, Iroh) based on configuration.
 pub struct NetworkManager {
     peer_manager: PeerManager,
-    connection_manager: ConnectionManager,
+    tcp_transport: TcpTransport,
+    #[cfg(feature = "quinn")]
+    quinn_transport: Option<crate::network::quinn_transport::QuinnTransport>,
+    #[cfg(feature = "iroh")]
+    iroh_transport: Option<crate::network::iroh_transport::IrohTransport>,
+    transport_preference: TransportPreference,
     peer_tx: mpsc::UnboundedSender<NetworkMessage>,
     peer_rx: mpsc::UnboundedReceiver<NetworkMessage>,
 }
@@ -116,16 +147,31 @@ pub enum NetworkMessage {
     BlockReceived(Vec<u8>),
     TransactionReceived(Vec<u8>),
     InventoryReceived(Vec<u8>),
+    #[cfg(feature = "utxo-commitments")]
+    UTXOSetReceived(Vec<u8>, SocketAddr), // (data, peer_addr)
+    #[cfg(feature = "utxo-commitments")]
+    FilteredBlockReceived(Vec<u8>, SocketAddr), // (data, peer_addr)
+    #[cfg(feature = "utxo-commitments")]
+    GetUTXOSetReceived(Vec<u8>, SocketAddr), // (data, peer_addr)
+    #[cfg(feature = "utxo-commitments")]
+    GetFilteredBlockReceived(Vec<u8>, SocketAddr), // (data, peer_addr)
+    #[cfg(feature = "stratum-v2")]
+    StratumV2MessageReceived(Vec<u8>, SocketAddr), // (data, peer_addr)
 }
 
 impl NetworkManager {
-    /// Create a new network manager
-    pub fn new(listen_addr: SocketAddr) -> Self {
+    /// Create a new network manager with default TCP-only transport
+    pub fn new(_listen_addr: SocketAddr) -> Self {
         let (peer_tx, peer_rx) = mpsc::unbounded_channel();
         
         Self {
             peer_manager: PeerManager::new(100), // Default max peers
-            connection_manager: ConnectionManager::new(listen_addr),
+            tcp_transport: TcpTransport::new(),
+            #[cfg(feature = "quinn")]
+            quinn_transport: None,
+            #[cfg(feature = "iroh")]
+            iroh_transport: None,
+            transport_preference: TransportPreference::TCP_ONLY,
             peer_tx,
             peer_rx,
         }
@@ -133,57 +179,169 @@ impl NetworkManager {
     
     /// Create a new network manager with custom configuration
     pub fn with_config(listen_addr: SocketAddr, max_peers: usize) -> Self {
+        Self::with_transport_preference(listen_addr, max_peers, TransportPreference::TCP_ONLY)
+    }
+    
+    /// Create a new network manager with transport preference
+    pub fn with_transport_preference(
+        _listen_addr: SocketAddr,
+        max_peers: usize,
+        preference: TransportPreference,
+    ) -> Self {
         let (peer_tx, peer_rx) = mpsc::unbounded_channel();
         
         Self {
             peer_manager: PeerManager::new(max_peers),
-            connection_manager: ConnectionManager::new(listen_addr),
+            tcp_transport: TcpTransport::new(),
+            #[cfg(feature = "quinn")]
+            quinn_transport: None, // Will be initialized on start if needed
+            #[cfg(feature = "iroh")]
+            iroh_transport: None, // Will be initialized on start if needed
+            transport_preference: preference,
             peer_tx,
             peer_rx,
         }
     }
     
+    /// Get transport preference
+    pub fn transport_preference(&self) -> TransportPreference {
+        self.transport_preference
+    }
+    
     /// Start the network manager
-    pub async fn start(&mut self) -> Result<()> {
-        info!("Starting network manager");
+    pub async fn start(&mut self, listen_addr: SocketAddr) -> Result<()> {
+        info!("Starting network manager with transport preference: {:?}", self.transport_preference);
         
-        let mut listener = self.connection_manager.start_listening().await?;
-        info!("Listening for connections");
-        
-        loop {
-            match listener.accept().await {
-                Ok((stream, addr)) => {
-                    info!("New connection from {}", addr);
-                    self.handle_new_connection(stream, addr).await?;
+        // Initialize Quinn transport if enabled
+        #[cfg(feature = "quinn")]
+        if self.transport_preference.allows_quinn() {
+            match crate::network::quinn_transport::QuinnTransport::new() {
+                Ok(quinn) => {
+                    self.quinn_transport = Some(quinn);
+                    info!("Quinn transport initialized");
                 }
                 Err(e) => {
-                    error!("Failed to accept connection: {}", e);
+                    warn!("Failed to initialize Quinn transport: {}", e);
+                    if self.transport_preference == TransportPreference::QUINN_ONLY {
+                        return Err(anyhow::anyhow!("Quinn-only mode requires Quinn transport"));
+                    }
                 }
             }
         }
-    }
-    
-    /// Handle a new peer connection
-    async fn handle_new_connection(
-        &mut self,
-        stream: tokio::net::TcpStream,
-        addr: SocketAddr,
-    ) -> Result<()> {
-        if !self.peer_manager.can_accept_peer() {
-            warn!("Rejecting connection from {}: peer limit reached", addr);
-            return Ok(());
+        
+        // Initialize Iroh transport if enabled
+        #[cfg(feature = "iroh")]
+        if self.transport_preference.allows_iroh() {
+            match crate::network::iroh_transport::IrohTransport::new().await {
+                Ok(iroh) => {
+                    self.iroh_transport = Some(iroh);
+                    info!("Iroh transport initialized");
+                }
+                Err(e) => {
+                    warn!("Failed to initialize Iroh transport: {}", e);
+                    if self.transport_preference == TransportPreference::IROH_ONLY {
+                        return Err(anyhow::anyhow!("Iroh-only mode requires Iroh transport"));
+                    }
+                }
+            }
         }
         
-        let peer = peer::Peer::new(stream, addr, self.peer_tx.clone());
-        self.peer_manager.add_peer(addr, peer)?;
+        // Start listening on TCP if allowed
+        if self.transport_preference.allows_tcp() {
+            let mut tcp_listener = self.tcp_transport.listen(listen_addr).await?;
+            info!("TCP listener started on {}", listen_addr);
+            
+            // Start TCP accept loop
+            let peer_tx = self.peer_tx.clone();
+            tokio::spawn(async move {
+                loop {
+                    match tcp_listener.accept().await {
+                        Ok((conn, addr)) => {
+                            info!("New TCP connection from {:?}", addr);
+                            // Extract SocketAddr for notification
+                            let socket_addr = match addr {
+                                TransportAddr::Tcp(addr) => addr,
+                                _ => {
+                                    error!("Invalid transport address for TCP");
+                                    continue;
+                                }
+                            };
+                            
+                            // Send connection notification
+                            let _ = peer_tx.send(NetworkMessage::PeerConnected(socket_addr));
+                            
+                            // Handle connection in background
+                            let peer_tx_clone = peer_tx.clone();
+                            tokio::spawn(async move {
+                                // Connection handling would go here
+                                // For now, just simulate
+                                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                                let mut conn_mut = conn;
+                                let _ = conn_mut.close().await;
+                                let _ = peer_tx_clone.send(NetworkMessage::PeerDisconnected(socket_addr));
+                            });
+                        }
+                        Err(e) => {
+                            error!("Failed to accept TCP connection: {}", e);
+                        }
+                    }
+                }
+            });
+        }
         
-        // Start peer handler
-        tokio::spawn(async move {
-            // Peer handling logic will be implemented
-        });
+        // Start Quinn listener if available
+        #[cfg(feature = "quinn")]
+        if let Some(ref quinn_transport) = self.quinn_transport {
+            let mut quinn_listener = quinn_transport.listen(listen_addr).await?;
+            info!("Quinn listener started on {}", listen_addr);
+            
+            // Start Quinn accept loop
+            let peer_tx = self.peer_tx.clone();
+            tokio::spawn(async move {
+                loop {
+                    match quinn_listener.accept().await {
+                        Ok((conn, addr)) => {
+                            info!("New Quinn connection from {:?}", addr);
+                            // Extract SocketAddr for notification
+                            let socket_addr = match addr {
+                                TransportAddr::Quinn(addr) => addr,
+                                _ => {
+                                    error!("Invalid transport address for Quinn");
+                                    continue;
+                                }
+                            };
+                            
+                            // Send connection notification
+                            let _ = peer_tx.send(NetworkMessage::PeerConnected(socket_addr));
+                            
+                            // Handle connection in background
+                            let peer_tx_clone = peer_tx.clone();
+                            tokio::spawn(async move {
+                                // Connection handling would go here
+                                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                                let mut conn_mut = conn;
+                                let _ = conn_mut.close().await;
+                                let _ = peer_tx_clone.send(NetworkMessage::PeerDisconnected(socket_addr));
+                            });
+                        }
+                        Err(e) => {
+                            error!("Failed to accept Quinn connection: {}", e);
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Start Iroh listener if available
+        #[cfg(feature = "iroh")]
+        if let Some(ref iroh_transport) = self.iroh_transport {
+            // Iroh listener implementation would go here
+            info!("Iroh transport ready for connections");
+        }
         
         Ok(())
     }
+    
     
     /// Get the number of connected peers
     pub fn peer_count(&self) -> usize {
@@ -238,8 +396,94 @@ impl NetworkManager {
                     info!("Inventory received: {} bytes", data.len());
                     // Process inventory
                 }
+                #[cfg(feature = "utxo-commitments")]
+                NetworkMessage::GetUTXOSetReceived(data, peer_addr) => {
+                    info!("GetUTXOSet received from {}: {} bytes", peer_addr, data.len());
+                    // Handle GetUTXOSet request
+                    self.handle_get_utxo_set_request(data, peer_addr).await?;
+                }
+                #[cfg(feature = "utxo-commitments")]
+                NetworkMessage::UTXOSetReceived(data, peer_addr) => {
+                    info!("UTXOSet received from {}: {} bytes", peer_addr, data.len());
+                    // Handle UTXOSet response (would notify waiting requests)
+                    // In full implementation, would match to pending request futures
+                }
+                #[cfg(feature = "utxo-commitments")]
+                NetworkMessage::GetFilteredBlockReceived(data, peer_addr) => {
+                    info!("GetFilteredBlock received from {}: {} bytes", peer_addr, data.len());
+                    // Handle GetFilteredBlock request
+                    self.handle_get_filtered_block_request(data, peer_addr).await?;
+                }
+                #[cfg(feature = "utxo-commitments")]
+                NetworkMessage::FilteredBlockReceived(data, peer_addr) => {
+                    info!("FilteredBlock received from {}: {} bytes", peer_addr, data.len());
+                    // Handle FilteredBlock response (would notify waiting requests)
+                    // In full implementation, would match to pending request futures
+                }
+                #[cfg(feature = "stratum-v2")]
+                NetworkMessage::StratumV2MessageReceived(data, peer_addr) => {
+                    info!("Stratum V2 message received from {}: {} bytes", peer_addr, data.len());
+                    // Handle Stratum V2 message
+                    // In full implementation, would:
+                    // 1. Route to StratumV2Server if server mode enabled
+                    // 2. Route to StratumV2Client if client mode enabled
+                    // 3. Send response back to peer
+                    // 4. Notify waiting futures via async message routing system
+                    
+                    // TODO: In full implementation, would check if server is active
+                    // and route message to server.handle_message()
+                    // For now, just log the message
+                }
             }
         }
+        Ok(())
+    }
+    
+    #[cfg(feature = "utxo-commitments")]
+    /// Handle GetUTXOSet request from a peer
+    async fn handle_get_utxo_set_request(&self, data: Vec<u8>, peer_addr: SocketAddr) -> Result<()> {
+        use crate::network::protocol::ProtocolParser;
+        use crate::network::protocol_extensions::handle_get_utxo_set;
+        use crate::network::protocol::ProtocolMessage;
+        
+        // Parse the request
+        let protocol_msg = ProtocolParser::parse_message(&data)?;
+        let get_utxo_set_msg = match protocol_msg {
+            ProtocolMessage::GetUTXOSet(msg) => msg,
+            _ => return Err(anyhow::anyhow!("Expected GetUTXOSet message")),
+        };
+        
+        // Handle the request (would integrate with UTXO commitment module)
+        let response = handle_get_utxo_set(get_utxo_set_msg).await?;
+        
+        // Serialize and send response
+        let response_wire = ProtocolParser::serialize_message(&ProtocolMessage::UTXOSet(response))?;
+        self.send_to_peer(peer_addr, response_wire).await?;
+        
+        Ok(())
+    }
+    
+    #[cfg(feature = "utxo-commitments")]
+    /// Handle GetFilteredBlock request from a peer
+    async fn handle_get_filtered_block_request(&self, data: Vec<u8>, peer_addr: SocketAddr) -> Result<()> {
+        use crate::network::protocol::ProtocolParser;
+        use crate::network::protocol_extensions::handle_get_filtered_block;
+        use crate::network::protocol::ProtocolMessage;
+        
+        // Parse the request
+        let protocol_msg = ProtocolParser::parse_message(&data)?;
+        let get_filtered_block_msg = match protocol_msg {
+            ProtocolMessage::GetFilteredBlock(msg) => msg,
+            _ => return Err(anyhow::anyhow!("Expected GetFilteredBlock message")),
+        };
+        
+        // Handle the request (would integrate with spam filter and block store)
+        let response = handle_get_filtered_block(get_filtered_block_msg).await?;
+        
+        // Serialize and send response
+        let response_wire = ProtocolParser::serialize_message(&ProtocolMessage::FilteredBlock(response))?;
+        self.send_to_peer(peer_addr, response_wire).await?;
+        
         Ok(())
     }
     
@@ -253,10 +497,6 @@ impl NetworkManager {
         &mut self.peer_manager
     }
     
-    /// Get connection manager reference
-    pub fn connection_manager(&self) -> &ConnectionManager {
-        &self.connection_manager
-    }
 }
 
 #[cfg(test)]
@@ -503,11 +743,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_network_manager_connection_manager_access() {
+    async fn test_network_manager_transport_preference() {
         let addr: std::net::SocketAddr = "127.0.0.1:8080".parse().unwrap();
         let manager = NetworkManager::new(addr);
         
-        let connection_manager = manager.connection_manager();
-        assert_eq!(connection_manager.listen_addr, addr);
+        assert_eq!(manager.transport_preference(), TransportPreference::TcpOnly);
     }
 }

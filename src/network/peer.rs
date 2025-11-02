@@ -10,7 +10,7 @@ use tracing::{debug, info};
 use super::NetworkMessage;
 
 /// Peer connection state
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Peer {
     addr: SocketAddr,
     message_tx: mpsc::UnboundedSender<NetworkMessage>,

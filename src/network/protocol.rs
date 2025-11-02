@@ -19,7 +19,9 @@ pub const ALLOWED_COMMANDS: &[&str] = &[
     "version", "verack", "ping", "pong", "getheaders", "headers",
     "getblocks", "block", "getdata", "inv", "tx", "notfound",
     "getaddr", "addr", "mempool", "reject", "feefilter", "sendcmpct",
-    "cmpctblock", "getblocktxn", "blocktxn", "getblocktxn"
+    "cmpctblock", "getblocktxn", "blocktxn", "getblocktxn",
+    // UTXO commitment protocol extensions
+    "getutxoset", "utxoset", "getfilteredblock", "filteredblock"
 ];
 
 /// Bitcoin protocol message types
@@ -36,6 +38,11 @@ pub enum ProtocolMessage {
     GetData(GetDataMessage),
     Inv(InvMessage),
     Tx(TxMessage),
+    // UTXO commitment protocol extensions
+    GetUTXOSet(GetUTXOSetMessage),
+    UTXOSet(UTXOSetMessage),
+    GetFilteredBlock(GetFilteredBlockMessage),
+    FilteredBlock(FilteredBlockMessage),
 }
 
 /// Version message
@@ -125,6 +132,95 @@ pub struct TxMessage {
     pub transaction: Transaction,
 }
 
+/// GetUTXOSet message - Request UTXO set at specific height
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetUTXOSetMessage {
+    /// Block height for which to request UTXO set
+    pub height: u64,
+    /// Block hash at requested height (for verification)
+    pub block_hash: Hash,
+}
+
+/// UTXOSet message - Response with UTXO set commitment
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UTXOSetMessage {
+    /// UTXO commitment (Merkle root, supply, count, etc.)
+    pub commitment: UTXOCommitment,
+    /// UTXO set size hint (for chunking)
+    pub utxo_count: u64,
+    /// Indicates if this is a complete set or partial chunk
+    pub is_complete: bool,
+    /// Chunk identifier if partial
+    pub chunk_id: Option<u32>,
+}
+
+/// UTXO commitment structure (matches consensus-proof definition)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UTXOCommitment {
+    pub merkle_root: Hash,
+    pub total_supply: u64,
+    pub utxo_count: u64,
+    pub block_height: u64,
+    pub block_hash: Hash,
+}
+
+/// GetFilteredBlock message - Request filtered block (spam-filtered)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetFilteredBlockMessage {
+    /// Block hash to request
+    pub block_hash: Hash,
+    /// Filter preferences (what spam types to filter)
+    pub filter_preferences: FilterPreferences,
+}
+
+/// FilterPreferences - Configure spam filtering
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilterPreferences {
+    /// Filter Ordinals/Inscriptions
+    pub filter_ordinals: bool,
+    /// Filter dust outputs (default: < 546 satoshis)
+    pub filter_dust: bool,
+    /// Filter BRC-20 patterns
+    pub filter_brc20: bool,
+    /// Minimum output value to include (satoshis)
+    pub min_output_value: u64,
+}
+
+/// FilteredBlock message - Response with filtered transactions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilteredBlockMessage {
+    /// Block header
+    pub header: BlockHeader,
+    /// UTXO commitment for this block
+    pub commitment: UTXOCommitment,
+    /// Filtered transactions (only non-spam)
+    pub transactions: Vec<Transaction>,
+    /// Transaction indices in original block (for verification)
+    pub transaction_indices: Vec<u32>,
+    /// Summary of filtered spam
+    pub spam_summary: SpamSummary,
+}
+
+/// SpamSummary - Summary of filtered spam transactions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpamSummary {
+    /// Number of transactions filtered
+    pub filtered_count: u32,
+    /// Total size of filtered transactions (bytes)
+    pub filtered_size: u64,
+    /// Breakdown by spam type
+    pub by_type: SpamBreakdown,
+}
+
+/// SpamBreakdown - Breakdown of spam by category
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpamBreakdown {
+    pub ordinals: u32,
+    pub inscriptions: u32,
+    pub dust: u32,
+    pub brc20: u32,
+}
+
 /// Bitcoin protocol message parser
 pub struct ProtocolParser;
 
@@ -186,6 +282,11 @@ impl ProtocolParser {
             "getdata" => Ok(ProtocolMessage::GetData(bincode::deserialize(payload)?)),
             "inv" => Ok(ProtocolMessage::Inv(bincode::deserialize(payload)?)),
             "tx" => Ok(ProtocolMessage::Tx(bincode::deserialize(payload)?)),
+            // UTXO commitment protocol extensions
+            "getutxoset" => Ok(ProtocolMessage::GetUTXOSet(bincode::deserialize(payload)?)),
+            "utxoset" => Ok(ProtocolMessage::UTXOSet(bincode::deserialize(payload)?)),
+            "getfilteredblock" => Ok(ProtocolMessage::GetFilteredBlock(bincode::deserialize(payload)?)),
+            "filteredblock" => Ok(ProtocolMessage::FilteredBlock(bincode::deserialize(payload)?)),
             _ => Err(anyhow::anyhow!("Unknown command: {}", command)),
         }
     }
@@ -204,6 +305,11 @@ impl ProtocolParser {
             ProtocolMessage::GetData(msg) => ("getdata", bincode::serialize(msg)?),
             ProtocolMessage::Inv(msg) => ("inv", bincode::serialize(msg)?),
             ProtocolMessage::Tx(msg) => ("tx", bincode::serialize(msg)?),
+            // UTXO commitment protocol extensions
+            ProtocolMessage::GetUTXOSet(msg) => ("getutxoset", bincode::serialize(msg)?),
+            ProtocolMessage::UTXOSet(msg) => ("utxoset", bincode::serialize(msg)?),
+            ProtocolMessage::GetFilteredBlock(msg) => ("getfilteredblock", bincode::serialize(msg)?),
+            ProtocolMessage::FilteredBlock(msg) => ("filteredblock", bincode::serialize(msg)?),
         };
         
         let mut message = Vec::new();
