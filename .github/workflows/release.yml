@@ -18,7 +18,7 @@ env:
 jobs:
   determine-version:
     name: Determine Version
-    runs-on: [self-hosted, linux, x64]
+    runs-on: [self-hosted, Linux, X64, builds]
     outputs:
       version: ${{ steps.version.outputs.version }}
       version_tag: ${{ steps.version.outputs.version_tag }}
@@ -59,7 +59,7 @@ jobs:
   publish:
     name: Publish to crates.io
     needs: determine-version
-    runs-on: [self-hosted, linux, x64]
+    runs-on: [self-hosted, Linux, X64, builds]
     steps:
       - uses: actions/checkout@v4
       
@@ -156,7 +156,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     needs: [determine-version, publish]
-    runs-on: [self-hosted, linux, x64]
+    runs-on: [self-hosted, Linux, X64, builds]
     steps:
       - uses: actions/checkout@v4
         with:
